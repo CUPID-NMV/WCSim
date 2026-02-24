@@ -1,0 +1,301 @@
+#include "DetectorConstruction.hh"
+#include "G4RunManager.hh"
+#include "G4NistManager.hh"
+#include "G4Box.hh"
+#include "G4LogicalVolume.hh"
+#include "G4PVPlacement.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4MaterialPropertiesTable.hh"
+#include "G4Tubs.hh" // Per le fibre cilindriche
+#include "G4RotationMatrix.hh"
+#include "PMTSD.hh"
+#include "G4SDManager.hh"
+#include "G4OpticalSurface.hh"
+#include "G4LogicalSkinSurface.hh"
+#include "G4VisAttributes.hh"
+#include "G4LogicalVolumeStore.hh"
+
+DetectorConstruction::DetectorConstruction(G4bool useMylar) : G4VUserDetectorConstruction(), fUseMylar(useMylar) {}
+DetectorConstruction::~DetectorConstruction() {}
+
+G4VPhysicalVolume* DetectorConstruction::Construct()
+{
+  G4NistManager* nist = G4NistManager::Instance();
+
+
+  //--- DEFINIZIONE MATERIALS ----
+  G4Material* air = nist->FindOrBuildMaterial("G4_AIR");
+  G4Material* hdpe = nist->FindOrBuildMaterial("G4_POLYETHYLENE");
+  G4Material* water = nist->FindOrBuildMaterial("G4_WATER");
+  //G4Material* fPoly = nist->FindOrBuildMaterial("G4_POLYSTYRENE");
+  G4Material* glass = nist->FindOrBuildMaterial("G4_GLASS_PLATE");
+  G4Material* coreMat = nist->FindOrBuildMaterial("G4_POLYSTYRENE");
+  G4Material* cladMat = nist->FindOrBuildMaterial("G4_PLEXIGLASS"); // PMMA/Acrylic
+
+  // --- 2. PROPRIETÀ OTTICHE ---
+  G4double energy[] = {2.0*eV, 2.87*eV, 3.5*eV, 5.0*eV};
+  const G4int nEntries = 4;
+
+
+  //--- PROPRIETA OTTICHE DELL'ACQUA ---
+  G4MaterialPropertiesTable* mptWater = new G4MaterialPropertiesTable();
+  G4double rIndexWater[] = {1.33, 1.33, 1.33, 1.33};
+  mptWater->AddProperty("RINDEX", energy, rIndexWater, nEntries);
+  water->SetMaterialPropertiesTable(mptWater);
+
+ 
+  // HDPE (Opaco ma con RINDEX per i confini)
+  G4MaterialPropertiesTable* mptHDPE = new G4MaterialPropertiesTable();
+  G4double rIndexHDPE[] = {1.54, 1.54, 1.54, 1.54};
+  G4double absHDPE[]   = {0.1*mm, 0.1*mm, 0.1*mm, 0.1*mm};
+  mptHDPE->AddProperty("RINDEX", energy, rIndexHDPE, nEntries);
+  mptHDPE->AddProperty("ABSLENGTH", energy, absHDPE, nEntries);
+  hdpe->SetMaterialPropertiesTable(mptHDPE);
+  
+
+  // CORE FIBRA SCINTILLANTE (BCF-10XL)
+  G4MaterialPropertiesTable* mptCore = new G4MaterialPropertiesTable();
+  G4double rIndexCore[] = {1.60, 1.60, 1.60, 1.60};
+  //G4double absCore[]    = {4.0*m, 4.0*m, 4.0*m, 4.0*m};
+  G4double wlsAbs[]     = {10.0*m, 10.0*m, 0.1*mm, 0.01*mm};
+  G4double scintEmit[] = {0.0, 1.0, 0.0, 0.0};
+  //G4double wlsEmit[]    = {0.0, 1.0, 0.0, 0.0};
+  mptCore->AddConstProperty("SCINTILLATIONYIELD", 8000./MeV);
+  mptCore->AddConstProperty("RESOLUTIONSCALE", 1.0);
+  mptCore->AddConstProperty("SCINTILLATIONTIMECONSTANT1", 2.7*ns);
+  mptCore->AddProperty("RINDEX", energy, rIndexCore, nEntries);
+  //mptCore->AddProperty("ABSLENGTH", energy, absCore, nEntries);
+  mptCore->AddProperty("WLSABSLENGTH", energy, wlsAbs, nEntries);
+  mptCore->AddProperty("SCINTILLATIONCOMPONENT1", energy, scintEmit, nEntries);
+  mptCore->AddProperty("WLSCOMPONENT", energy, scintEmit, nEntries);
+  //mptCore->AddProperty("WLSCOMPONENT", energy, wlsEmit, nEntries);
+  mptCore->AddConstProperty("WLSTIMECONSTANT", 2.7*ns, true);
+  mptCore->AddConstProperty("WLSCOMPONENTQUANUMYIELD", 0.86, true);
+  coreMat->SetMaterialPropertiesTable(mptCore);
+
+
+  // CLADDING FIBRA (PMMA)
+  G4MaterialPropertiesTable* mptClad = new G4MaterialPropertiesTable();
+  G4double rIndexClad[] = {1.49, 1.49, 1.49, 1.49};
+  mptClad->AddProperty("RINDEX", energy, rIndexClad, nEntries);
+  cladMat->SetMaterialPropertiesTable(mptClad);
+
+
+  // VETRO PMT
+  G4MaterialPropertiesTable* mptGlass = new G4MaterialPropertiesTable();
+  G4double rIndexGlass[] = {1.49, 1.49, 1.49, 1.49};
+  mptGlass->AddProperty("RINDEX", energy, rIndexGlass, nEntries);
+  glass->SetMaterialPropertiesTable(mptGlass);
+
+  //--- GEOMETRY ---
+
+  //--- WORLD (aria) ---
+  G4Box* solidWorld = new G4Box("World", 3.*m, 3.*m, 3.*m);
+  G4LogicalVolume* logicWorld = new G4LogicalVolume(solidWorld, air, "World");
+  G4VPhysicalVolume* physWorld = new G4PVPlacement(0, G4ThreeVector(), logicWorld, "World", 0, false, 0);
+
+  // TANK ESTERNO (HDPE) - 1000(X) x 940(Y) x 120(Z) mm
+  G4double tankX = 500.*mm; 
+  G4double tankY = 470.*mm; // Verticale
+  G4double tankZ = 60.*mm;  // Spessore lungo il fascio
+  G4Box* solidTank = new G4Box("TankBox", tankX, tankY, tankZ);
+  G4LogicalVolume* logicTank = new G4LogicalVolume(solidTank, hdpe, "TankLogic");
+  G4VPhysicalVolume* physTank = new G4PVPlacement(0, G4ThreeVector(0,0,0), logicTank, "TankPhys", logicWorld, false, 0, true);
+
+  G4Material* mylar = nist->FindOrBuildMaterial("G4_MYLAR");
+
+  G4LogicalVolume* logicMotherForWater = logicTank;
+  G4LogicalVolume* logicMylar = nullptr;
+
+  if (fUseMylar) {
+
+    // Proprieta ottiche del Mylar
+    G4MaterialPropertiesTable* mptMylar = new G4MaterialPropertiesTable();
+    G4double rIndexMylar[] = {1.50, 1.50, 1.50, 1.50};
+    mptMylar->AddProperty("RINDEX", energy, rIndexMylar, nEntries);
+    mylar->SetMaterialPropertiesTable(mptMylar);
+
+    // --- Geometria Mylar (100 micron = 0.1 mm) ---
+    G4Box* solidMylar = new G4Box("MylarBox", 490.1*mm, 460.1*mm, 50.1*mm);
+    G4LogicalVolume* logicMylar = new G4LogicalVolume(solidMylar, mylar, "MylarLogic");
+    new G4PVPlacement(0, G4ThreeVector(), logicMylar, "MylarPhys", logicTank, false, 0, true);
+
+    // Superficie riflettente 
+    G4OpticalSurface* surf = new G4OpticalSurface("MylarSurf", unified, polished, dielectric_metal);
+    G4double refl[] = {0.95, 0.95};
+    G4MaterialPropertiesTable* mptSurf = new G4MaterialPropertiesTable();
+    mptSurf->AddProperty("REFLECTIVITY", energy, refl, 2);
+    surf->SetMaterialPropertiesTable(mptSurf);
+    new G4LogicalSkinSurface("MylarSkin", logicMylar, surf);
+
+    logicMotherForWater = logicMylar;
+  }
+
+  // CAVITÀ INTERNA (ACQUA) - Spessore attivo 100 mm
+  // Assumiamo pareti esterne del tank di 10 mm (10+100+10 = 120 mm)
+  G4double waterX = 490.*mm; // 1000 - 20mm di guscio
+  G4double waterY = 460.*mm; // 940 - 20mm di guscio
+  G4double waterZ = 50.*mm;  // 100mm totali
+  G4Box* solidWater = new G4Box("WaterBox", waterX, waterY, waterZ);
+  G4LogicalVolume* logicWater = new G4LogicalVolume(solidWater, water, "WaterLogic");
+  G4VPhysicalVolume* physWater = new G4PVPlacement(0, G4ThreeVector(0,0,0), logicWater, "WaterPhys", logicMotherForWater, false, 0, true);
+
+  // SETTI INTERNI (HDPE) - Spessore 10 mm
+  // "Gap di 30 mm dai lati esterni (940 mm)" -> Altezza setto = 940 - 30 - 30 = 880 mm
+  G4double wallX = 470.0*mm;   // 10mm totale
+  G4double wallY = 5.0*mm; // 880mm totale (semi-dim 440)
+  G4double wallZ = 50.0*mm;  // 100mm totale (stesso dell'acqua)
+  G4Box* solidWall = new G4Box("InternalWall", wallX, wallY, wallZ);
+  G4LogicalVolume* logicWall = new G4LogicalVolume(solidWall, hdpe, "WallLogic");
+
+  // Posizionamento dei setti per dividere la larghezza (920 mm) in 3 settori
+  // Centro dei settori a circa +/- 155 mm. Pareti a +/- 166.6 mm
+  G4VPhysicalVolume* physWall1 = new G4PVPlacement(0, G4ThreeVector(0, -153*mm, 0), logicWall, "WallPhys1", logicWater, false, 0, true);
+  G4VPhysicalVolume* physWall2 = new G4PVPlacement(0, G4ThreeVector(0, 153*mm, 0), logicWall, "WallPhys2", logicWater, false, 1, true);
+
+  // --- 2. GEOMETRIA FIBRE ---
+
+  G4double cladR = 0.5*mm;
+  G4double coreR = 0.47*mm;
+  G4double ringR = 4.0*mm;
+
+  // Centri dei settori: bottom (~ -306), mid (0), top (~ 306)
+  G4double yCenters[3] = {-306.5*mm, 0.0*mm, 306.5*mm};
+
+  auto makeFiber = [&](G4double halfL, G4String name) {
+        G4Tubs* sClad = new G4Tubs(name+"_Clad", 0, cladR, halfL, 0, 360*deg);
+        G4Tubs* sCore = new G4Tubs(name+"_Core", 0, coreR, halfL, 0, 360*deg);
+        G4LogicalVolume* lClad = new G4LogicalVolume(sClad, cladMat, name+"_CladLog");
+        G4LogicalVolume* lCore = new G4LogicalVolume(sCore, coreMat, name+"_CoreLog");
+        new G4PVPlacement(0, G4ThreeVector(), lCore, name+"_CorePhys", lClad, false, 0, true);
+        return lClad;
+  };
+
+  G4LogicalVolume* fWaterLog = makeFiber(fUseMylar ? 490.0*mm : 490.1*mm, "F_Water");
+  G4LogicalVolume* fTankLog  = makeFiber(fUseMylar ? 4.95*mm : 5.0*mm,   "F_Tank");
+  G4LogicalVolume* fMylarLog = nullptr;
+  if (fUseMylar) fMylarLog = makeFiber(0.05*mm, "F_Mylar");
+
+  G4RotationMatrix* rotF = new G4RotationMatrix();
+  rotF->rotateY(90*deg);
+
+
+  for (int s = 0; s < 3; s++) {
+    
+    for (int i = 0; i < 18; i++) {
+      //G4double rho = (i==0) ? 0 : (i<=6 ? 1.2*mm : 2.4*mm);
+      //G4double phi = (i==0) ? 0 : (i<=6 ? (i-1)*60*deg : (i-7)*(360./11.)*deg);
+      G4double angle = i * (360.0/18.0) * deg;
+      G4double yP = yCenters[s] + ringR * std::sin(angle);
+      G4double zP = ringR * std::cos(angle);
+      G4int copyNo = s * 18 + i;
+      //G4double yP = rho*std::cos(phi);
+      //G4double zP = rho*std::sin(phi);
+
+    // 1. Parte nell'acqua
+    new G4PVPlacement(rotF, G4ThreeVector(0, yP, zP), fWaterLog, "F_W_P", logicWater, false, copyNo, true);
+
+    if (fUseMylar) {
+
+      // Pezzetto nel Mylar
+      new G4PVPlacement(rotF, G4ThreeVector(490.05*mm, yP, zP), fMylarLog, "F_M_P_R", logicMotherForWater, false, copyNo, true);
+      new G4PVPlacement(rotF, G4ThreeVector(-490.05*mm, yP, zP), fMylarLog, "F_M_P_L", logicMotherForWater, false, copyNo, true);
+
+      //pezzetto nel tank (leggermente spostato)
+      new G4PVPlacement(rotF, G4ThreeVector(495.05*mm, yP, zP), fTankLog, "F_T_P_R", logicTank, false, copyNo, true);
+      new G4PVPlacement(rotF, G4ThreeVector(-495.05*mm, yP, zP), fTankLog, "F_T_P_L", logicTank, false, copyNo, true);
+       
+    } else {
+
+      // pezzetto nel tank (standard)
+      new G4PVPlacement(rotF, G4ThreeVector(495.*mm, yP, zP), fTankLog, "F_T_P_R", logicTank, false, copyNo, true);
+      new G4PVPlacement(rotF, G4ThreeVector(-495.*mm, yP, zP), fTankLog, "F_T_P_L", logicTank, false, copyNo, true);
+    }
+    
+    }
+  }
+
+
+  // --- 6. PMTs (Rivelatori alle estremità delle fibre) ---
+  // Dimensioni: Spessore 10mm (X), Altezza 60mm (Y), Profondità 60mm (Z)
+  // Queste dimensioni coprono abbondantemente il fascio di fibre 6x3
+  G4double pmtHalfX = 5.0*mm;  // Spessore totale 10mm
+  G4double pmtHalfY = 15.0*mm; // Altezza totale 60mm
+  G4double pmtHalfZ = 15.0*mm; // Profondità totale 60mm
+
+  G4Box* sPMT = new G4Box("PMTBox", pmtHalfX, pmtHalfY, pmtHalfZ);
+
+  for (int s = 0; s < 3; s++) {
+
+    G4String nameL = "LogicPMT_L" + std::to_string(s);
+    G4String nameR = "LogicPMT_R" + std::to_string(s);
+  
+    G4LogicalVolume* lPMT_L = new G4LogicalVolume(sPMT, glass, nameL);
+    G4LogicalVolume* lPMT_R = new G4LogicalVolume(sPMT, glass, nameR);
+    new G4PVPlacement(0, G4ThreeVector(-504.9*mm, yCenters[s], 0), lPMT_L, "PhysPMT_L", logicWorld, false, s, true);
+    new G4PVPlacement(0, G4ThreeVector(504.9*mm, yCenters[s], 0), lPMT_R, "PhysPMT_R", logicWorld, false, s, true);
+
+  }
+
+  // =======================================================
+  // --- 7. ATTRIBUTI VISIVI (COLORI) ---
+  // =======================================================
+  logicWorld->SetVisAttributes(G4VisAttributes::GetInvisible());
+
+  G4VisAttributes* tankVis = new G4VisAttributes(G4Colour(0.5, 0.5, 0.5, 0.3)); // Grigio scuro semi-trasparente
+  logicTank->SetVisAttributes(tankVis);
+  logicWall->SetVisAttributes(tankVis); // I setti interni hanno lo stesso colore
+
+  G4VisAttributes* waterVis = new G4VisAttributes(G4Colour(0.0, 0.5, 1.0, 0.2)); // Azzurro acqua molto trasparente
+  logicWater->SetVisAttributes(waterVis);
+
+  if (fUseMylar) {
+      G4VisAttributes* mylarVis = new G4VisAttributes(G4Colour(0.8, 0.8, 0.9, 0.5)); // Argento/metallico
+      logicMylar->SetVisAttributes(mylarVis);
+  }
+
+  G4VisAttributes* cladVis = new G4VisAttributes(G4Colour(1.0, 0.5, 0.0, 0.8)); // Arancione
+  G4VisAttributes* coreVis = new G4VisAttributes(G4Colour(0.0, 1.0, 0.0, 1.0)); // Verde WLS
+  // Applichiamo i colori alle fibre (bisogna recuperare i Logical Volume creati dalla lambda)
+  fWaterLog->SetVisAttributes(cladVis);
+  fTankLog->SetVisAttributes(cladVis);
+  if (fUseMylar) fMylarLog->SetVisAttributes(cladVis);
+  
+  // Per colorare il core, lo recuperiamo tramite il suo nome (poiché è figlio del Cladding)
+  G4LogicalVolumeStore* lvStore = G4LogicalVolumeStore::GetInstance();
+  for (auto lv : *lvStore) {
+      if (lv->GetName().find("CoreLog") != std::string::npos) lv->SetVisAttributes(coreVis);
+  }
+
+  G4VisAttributes* pmtVis = new G4VisAttributes(G4Colour(1.0, 0.0, 0.0, 1.0)); // Rosso acceso per i PMT
+  pmtVis->SetForceSolid(true); // Li fa apparire pieni, non a fil di ferro
+  for (int s = 0; s < 3; s++) {
+      lvStore->GetVolume("LogicPMT_L" + std::to_string(s))->SetVisAttributes(pmtVis);
+      lvStore->GetVolume("LogicPMT_R" + std::to_string(s))->SetVisAttributes(pmtVis);
+  }
+
+  return physWorld;
+
+}
+
+void DetectorConstruction::ConstructSDandField() {
+  
+    G4SDManager* sdM = G4SDManager::GetSDMpointer();
+
+    for (int s = 0; s < 3; s++) {
+
+      G4String sdNameL = "PMT_SD_L" + std::to_string(s);
+      G4String sdNameR = "PMT_SD_R" + std::to_string(s);
+      G4String logNameL = "LogicPMT_L" + std::to_string(s);
+      G4String logNameR = "LogicPMT_R" + std::to_string(s);
+      
+      PMTSD* sdL = new PMTSD(sdNameL);
+      PMTSD* sdR = new PMTSD(sdNameR);
+      
+      sdM->AddNewDetector(sdL);
+      sdM->AddNewDetector(sdR);
+      
+      SetSensitiveDetector(logNameL, sdL);
+      SetSensitiveDetector(logNameR, sdR);
+    }
+}

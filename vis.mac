@@ -1,0 +1,42 @@
+# ==========================================
+# --- INIZIALIZZAZIONE E FINESTRA ---
+# ==========================================
+/vis/open OGL 800x800-0+0
+/vis/viewer/set/background black
+/vis/viewer/set/style surface
+/vis/viewer/set/autoRefresh true
+
+# Rende le curve (come le fibre cilindriche) più morbide e perfette
+/vis/viewer/set/lineSegmentsPerCircle 36
+
+# Disegna la geometria (I colori vengono presi in automatico dal C++!)
+/vis/drawVolume
+
+# Nascondi il World per non vedere il cubo esterno
+/vis/geometry/set/visibility World 0 false
+
+# ==========================================
+# --- TRAIETTORIE E COLORI DELLE PARTICELLE ---
+# ==========================================
+/vis/scene/add/trajectories smooth
+/vis/scene/endOfEventAction accumulate
+
+# Coloriamo le tracce in base al tipo di particella!
+/vis/modeling/trajectories/create/drawByParticleID
+/vis/modeling/trajectories/drawByParticleID-0/set e- red
+/vis/modeling/trajectories/drawByParticleID-0/set opticalphoton cyan
+
+# ==========================================
+# --- FILTRI ---
+# ==========================================
+# Filtro per nascondere i raggi gamma (Bremsstrahlung) che "sporcano" la vista
+/vis/filtering/trajectories/create/particleFilter gammaFilter
+/vis/filtering/trajectories/gammaFilter/add gamma
+/vis/filtering/trajectories/gammaFilter/invert true
+
+# ==========================================
+# --- VISUALIZZAZIONE AVANZATA E TELECAMERA ---
+# ==========================================
+/vis/viewer/set/viewpointVector 1 1 1
+/vis/viewer/zoom 1.4
+/vis/viewer/set/auxiliaryEdge true

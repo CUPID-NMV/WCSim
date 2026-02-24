@@ -1,0 +1,64 @@
+#include "SteppingAction.hh"
+#include "EventAction.hh"
+#include "G4Step.hh"
+#include "G4RunManager.hh"
+#include "G4Electron.hh"
+#include "G4AnalysisManager.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4OpticalPhoton.hh"
+
+SteppingAction::SteppingAction() : G4UserSteppingAction() {}
+SteppingAction::~SteppingAction() {}
+
+void SteppingAction::UserSteppingAction(const G4Step* step) {
+  
+    auto track = step->GetTrack();
+    auto eventAction = (EventAction*)G4RunManager::GetRunManager()->GetUserEventAction();
+
+    // ===================================================
+    // 1. FOTONI OTTICI
+    // ===================================================
+    if(track->GetDefinition() == G4OpticalPhoton::Definition()) {
+      auto prePoint = step->GetPreStepPoint();
+      auto postPoint = step->GetPostStepPoint();
+
+      if(prePoint->GetPhysicalVolume() && postPoint->GetPhysicalVolume()) {
+        G4String preName = prePoint->GetPhysicalVolume()->GetName();
+        G4String postName = postPoint->GetPhysicalVolume()->GetName();
+
+        // A. INGRESSO NELLE FIBRE DALL'ACQUA
+        if(preName == "WaterPhys" && postName.find("F_") != std::string::npos) {
+          if(track->GetCreatorProcess() && track->GetCreatorProcess()->GetProcessName() == "Cerenkov") {
+            if(eventAction->IsPhotonUnique(track->GetTrackID())) {
+              eventAction->AddCerenkovEntrati();
+            }
+          }
+        }
+      }
+    }
+            
+    // ===================================================
+    // 2. DATI ELETTRONE NELL'ACQUA
+    // ===================================================
+    if (track->GetDefinition() == G4Electron::Definition() && track->GetTrackID() == 1) {
+        auto volume = track->GetVolume();
+        if (volume && volume->GetName() == "WaterPhys") {
+            if (step->IsFirstStepInVolume()) {
+                eventAction->SetInitialEnergy(step->GetPreStepPoint()->GetKineticEnergy());
+            }
+            eventAction->AddEdep(step->GetTotalEnergyDeposit());
+            eventAction->AddTrackLength(step->GetStepLength());
+        }
+    }
+
+    // ===================================================
+    // 3. CONTEGGIO PRODUZIONE CHERENKOV
+    // ===================================================
+    auto secondaries = step->GetSecondaryInCurrentStep();
+    for (auto sec : *secondaries) {
+        if (sec->GetCreatorProcess() && sec->GetCreatorProcess()->GetProcessName() == "Cerenkov") {
+            eventAction->AddCerenkovProd();
+            // Niente più am->FillNtuple qui! Abbiamo salvato i Gigabyte!
+        }
+    }
+}

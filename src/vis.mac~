@@ -1,0 +1,57 @@
+# --- INIZIALIZZAZIONE ---
+/vis/open OGL 800x800-0+0
+/vis/viewer/set/background black
+/vis/viewer/set/style surface
+/vis/viewer/set/autoRefresh true
+
+# Disegna la geometria
+/vis/drawVolume
+
+# --- VISIBILITÀ E COLORI ---
+
+# Nascondi il World
+/vis/geometry/set/visibility World 0 false
+
+# Tank HDPE (Grigio chiaro, molto trasparente)
+/vis/geometry/set/colour TankLogic 0 0.7 0.7 0.7 0.1
+
+# Acqua (Azzurro, trasparente)
+/vis/geometry/set/colour WaterLogic 0 0.0 0.6 1.0 0.3
+
+# Pareti interne (Grigio scuro)
+/vis/geometry/set/colour WallLogic 0 0.4 0.4 0.4 0.5
+
+# --- VOLUMI DEL MYLAR (Verranno ignorati se useMylar è false) ---
+# Mylar (Argento/Bianco, quasi invisibile per vedere dentro)
+/vis/geometry/set/colour MylarLogic 0 0.9 0.9 0.9 0.1
+
+# --- FIBRE (Tutti i segmenti arancioni) ---
+/vis/geometry/set/colour F_Water_CladLog 0 1.0 0.5 0.0 1.0
+/vis/geometry/set/colour F_Water_CoreLog 0 1.0 0.5 0.0 1.0
+/vis/geometry/set/colour F_Tank_CladLog  0 1.0 0.5 0.0 1.0
+/vis/geometry/set/colour F_Tank_CoreLog  0 1.0 0.5 0.0 1.0
+# Questi due sotto si attivano solo con il Mylar
+/vis/geometry/set/colour F_Mylar_CladLog 0 1.0 0.5 0.0 1.0
+/vis/geometry/set/colour F_Mylar_CoreLog 0 1.0 0.5 0.0 1.0
+
+# --- PMTs (Tutti i 6 sensori in Giallo/Oro) ---
+/vis/geometry/set/colour LogicPMT_L0 0 1.0 0.8 0.0 0.8
+/vis/geometry/set/colour LogicPMT_R0 0 1.0 0.8 0.0 0.8
+/vis/geometry/set/colour LogicPMT_L1 0 1.0 0.8 0.0 0.8
+/vis/geometry/set/colour LogicPMT_R1 0 1.0 0.8 0.0 0.8
+/vis/geometry/set/colour LogicPMT_L2 0 1.0 0.8 0.0 0.8
+/vis/geometry/set/colour LogicPMT_R2 0 1.0 0.8 0.0 0.8
+
+# --- VISUALIZZAZIONE AVANZATA ---
+/vis/viewer/set/viewpointVector 1 1 1
+/vis/viewer/zoom 1.4
+/vis/viewer/set/auxiliaryEdge true
+
+# --- TRAIETTORIE E FILTRI ---
+/vis/scene/add/trajectories smooth
+/vis/scene/endOfEventAction accumulate
+
+# Filtro per nascondere i raggi gamma (Bremsstrahlung)
+/vis/filtering/trajectories/create/particleFilter gammaFilter
+/vis/filtering/trajectories/gammaFilter/add gamma
+/vis/filtering/trajectories/gammaFilter/invert true
